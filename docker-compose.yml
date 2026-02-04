@@ -26,12 +26,17 @@ services:
       retries: 3
       start_period: 30s
 
+    networks:
+      - openclaw-net
+
     restart: unless-stopped
 
   openclaw-gateway:
     image: ${OPENCLAW_IMAGE:-openclaw:local}
     depends_on:
       ollama:
+        condition: service_healthy
+      openclaw-browser:
         condition: service_healthy
 
     # Security hardening (OWASP A02:2025 - Security Misconfiguration)
@@ -101,6 +106,9 @@ services:
         max-size: "10m"
         max-file: "3"
 
+    networks:
+      - openclaw-net
+
     init: true
     restart: unless-stopped
     command:
@@ -141,10 +149,59 @@ services:
       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
       - openclaw_agents:/home/node/.openclaw/agents
 
+    networks:
+      - openclaw-net
+
     stdin_open: true
     tty: true
     init: true
     entrypoint: ["node", "dist/index.js"]
+
+  # Headless Chrome browser for automated browsing
+  openclaw-browser:
+    build:
+      context: .
+      dockerfile: Dockerfile.sandbox-browser
+    image: openclaw-browser:local
+
+    # Security hardening
+    security_opt:
+      - no-new-privileges:true
+
+    environment:
+      OPENCLAW_BROWSER_HEADLESS: "1"
+      OPENCLAW_BROWSER_CDP_PORT: "9222"
+      OPENCLAW_BROWSER_ENABLE_NOVNC: "0"
+
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          memory: 2G
+          cpus: "2"
+        reservations:
+          memory: 512M
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-sS", "http://127.0.0.1:9222/json/version"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+    networks:
+      openclaw-net:
+        ipv4_address: 172.28.0.10
+
+    restart: unless-stopped
+
+networks:
+  openclaw-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.28.0.0/16
 
 volumes:
   ollama_data:

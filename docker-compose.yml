@@ -53,6 +53,8 @@ services:
       CLAUDE_WEB_SESSION_KEY: ${CLAUDE_WEB_SESSION_KEY:-}
       CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
       OLLAMA_HOST: http://ollama:11434
+      # Enable Docker relay mode for Chrome extension
+      OPENCLAW_RELAY_DOCKER: "true"
 
     volumes:
       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
@@ -65,6 +67,9 @@ services:
       - "192.168.50.210:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
       - "127.0.0.1:${OPENCLAW_BRIDGE_PORT:-18790}:18790"
       - "192.168.50.210:${OPENCLAW_BRIDGE_PORT:-18790}:18790"
+      # Browser Relay (CDP)
+      - "127.0.0.1:18792:18792"
+      - "192.168.50.210:18792:18792"
 
     # Health check for monitoring
     healthcheck:

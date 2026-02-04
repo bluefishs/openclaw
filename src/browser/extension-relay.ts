@@ -114,6 +114,32 @@ function isLoopbackHost(host: string) {
   );
 }
 
+/**
+ * Check if the IP is a Docker bridge network address.
+ * Docker typically uses 172.16.0.0/12 for bridge networks.
+ */
+function isDockerBridgeAddress(ip: string | undefined): boolean {
+  if (!ip) {
+    return false;
+  }
+  // Docker bridge network: 172.16.0.0/12 (172.16.0.0 - 172.31.255.255)
+  const match = ip.match(/^(?:::ffff:)?(\d+)\.(\d+)\.(\d+)\.(\d+)$/);
+  if (!match) {
+    return false;
+  }
+  const [, a, b] = match.map(Number);
+  // 172.16.0.0/12 = 172.16.x.x to 172.31.x.x
+  return a === 172 && b >= 16 && b <= 31;
+}
+
+/**
+ * Check if Docker relay mode is enabled via environment variable.
+ * When enabled, allows connections from Docker bridge networks.
+ */
+function isDockerRelayEnabled(): boolean {
+  return process.env.OPENCLAW_RELAY_DOCKER === "true" || process.env.OPENCLAW_RELAY_DOCKER === "1";
+}
+
 function isLoopbackAddress(ip: string | undefined): boolean {
   if (!ip) {
     return false;
@@ -128,6 +154,10 @@ function isLoopbackAddress(ip: string | undefined): boolean {
     return true;
   }
   if (ip.startsWith("::ffff:127.")) {
+    return true;
+  }
+  // In Docker mode, also allow Docker bridge network addresses
+  if (isDockerRelayEnabled() && isDockerBridgeAddress(ip)) {
     return true;
   }
   return false;
@@ -734,8 +764,11 @@ export async function ensureChromeExtensionRelayServer(opts: {
     });
   });
 
+  // In Docker mode, bind to 0.0.0.0 to allow connections through port mapping
+  const bindHost = isDockerRelayEnabled() ? "0.0.0.0" : info.host;
+
   await new Promise<void>((resolve, reject) => {
-    server.listen(info.port, info.host, () => resolve());
+    server.listen(info.port, bindHost, () => resolve());
     server.once("error", reject);
   });
 

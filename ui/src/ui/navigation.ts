@@ -1,13 +1,26 @@
+import { t } from "../i18n/index.ts";
 import type { IconName } from "./icons.js";
 
 export const TAB_GROUPS = [
-  { label: "Chat", tabs: ["chat"] },
+  { label: "chat", tabs: ["chat"] },
   {
-    label: "Control",
-    tabs: ["overview", "channels", "instances", "sessions", "cron"],
+    label: "control",
+    tabs: ["overview", "channels", "instances", "sessions", "usage", "cron"],
   },
-  { label: "Agent", tabs: ["agents", "skills", "nodes"] },
-  { label: "Settings", tabs: ["config", "debug", "logs"] },
+  { label: "agent", tabs: ["agents", "skills", "nodes", "workflows"] },
+  {
+    label: "settings",
+    tabs: [
+      "config",
+      "communications",
+      "appearance",
+      "automation",
+      "infrastructure",
+      "aiAgents",
+      "debug",
+      "logs",
+    ],
+  },
 ] as const;
 
 export type Tab =
@@ -16,13 +29,20 @@ export type Tab =
   | "channels"
   | "instances"
   | "sessions"
+  | "usage"
   | "cron"
   | "skills"
   | "nodes"
   | "chat"
   | "config"
+  | "communications"
+  | "appearance"
+  | "automation"
+  | "infrastructure"
+  | "aiAgents"
   | "debug"
-  | "logs";
+  | "logs"
+  | "workflows";
 
 const TAB_PATHS: Record<Tab, string> = {
   agents: "/agents",
@@ -30,13 +50,20 @@ const TAB_PATHS: Record<Tab, string> = {
   channels: "/channels",
   instances: "/instances",
   sessions: "/sessions",
+  usage: "/usage",
   cron: "/cron",
   skills: "/skills",
   nodes: "/nodes",
   chat: "/chat",
   config: "/config",
+  communications: "/communications",
+  appearance: "/appearance",
+  automation: "/automation",
+  infrastructure: "/infrastructure",
+  aiAgents: "/ai-agents",
   debug: "/debug",
   logs: "/logs",
+  workflows: "/workflows",
 };
 
 const PATH_TO_TAB = new Map(Object.entries(TAB_PATHS).map(([tab, path]) => [path, tab as Tab]));
@@ -134,6 +161,8 @@ export function iconForTab(tab: Tab): IconName {
       return "radio";
     case "sessions":
       return "fileText";
+    case "usage":
+      return "barChart";
     case "cron":
       return "loader";
     case "skills":
@@ -142,73 +171,31 @@ export function iconForTab(tab: Tab): IconName {
       return "monitor";
     case "config":
       return "settings";
+    case "communications":
+      return "send";
+    case "appearance":
+      return "spark";
+    case "automation":
+      return "terminal";
+    case "infrastructure":
+      return "globe";
+    case "aiAgents":
+      return "brain";
     case "debug":
       return "bug";
     case "logs":
       return "scrollText";
+    case "workflows":
+      return "gitBranch";
     default:
       return "folder";
   }
 }
 
 export function titleForTab(tab: Tab) {
-  switch (tab) {
-    case "agents":
-      return "Agents";
-    case "overview":
-      return "Overview";
-    case "channels":
-      return "Channels";
-    case "instances":
-      return "Instances";
-    case "sessions":
-      return "Sessions";
-    case "cron":
-      return "Cron Jobs";
-    case "skills":
-      return "Skills";
-    case "nodes":
-      return "Nodes";
-    case "chat":
-      return "Chat";
-    case "config":
-      return "Config";
-    case "debug":
-      return "Debug";
-    case "logs":
-      return "Logs";
-    default:
-      return "Control";
-  }
+  return t(`tabs.${tab}`);
 }
 
 export function subtitleForTab(tab: Tab) {
-  switch (tab) {
-    case "agents":
-      return "Manage agent workspaces, tools, and identities.";
-    case "overview":
-      return "Gateway status, entry points, and a fast health read.";
-    case "channels":
-      return "Manage channels and settings.";
-    case "instances":
-      return "Presence beacons from connected clients and nodes.";
-    case "sessions":
-      return "Inspect active sessions and adjust per-session defaults.";
-    case "cron":
-      return "Schedule wakeups and recurring agent runs.";
-    case "skills":
-      return "Manage skill availability and API key injection.";
-    case "nodes":
-      return "Paired devices, capabilities, and command exposure.";
-    case "chat":
-      return "Direct gateway chat session for quick interventions.";
-    case "config":
-      return "Edit ~/.openclaw/openclaw.json safely.";
-    case "debug":
-      return "Gateway snapshots, events, and manual RPC calls.";
-    case "logs":
-      return "Live tail of the gateway file logs.";
-    default:
-      return "";
-  }
+  return t(`subtitles.${tab}`);
 }

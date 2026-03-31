@@ -1,4 +1,5 @@
 import { getPublicKeyAsync, signAsync, utils } from "@noble/ed25519";
+import { getSafeLocalStorage } from "../local-storage.ts";
 
 type StoredIdentity = {
   version: 1;
@@ -42,7 +43,7 @@ function bytesToHex(bytes: Uint8Array): string {
 }
 
 async function fingerprintPublicKey(publicKey: Uint8Array): Promise<string> {
-  const hash = await crypto.subtle.digest("SHA-256", publicKey);
+  const hash = await crypto.subtle.digest("SHA-256", publicKey.slice().buffer);
   return bytesToHex(new Uint8Array(hash));
 }
 
@@ -58,8 +59,9 @@ async function generateIdentity(): Promise<DeviceIdentity> {
 }
 
 export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
+  const storage = getSafeLocalStorage();
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = storage?.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as StoredIdentity;
       if (
@@ -74,7 +76,7 @@ export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
             ...parsed,
             deviceId: derivedId,
           };
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(updated));
+          storage?.setItem(STORAGE_KEY, JSON.stringify(updated));
           return {
             deviceId: derivedId,
             publicKey: parsed.publicKey,
@@ -100,7 +102,7 @@ export async function loadOrCreateDeviceIdentity(): Promise<DeviceIdentity> {
     privateKey: identity.privateKey,
     createdAtMs: Date.now(),
   };
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(stored));
+  storage?.setItem(STORAGE_KEY, JSON.stringify(stored));
   return identity;
 }
 

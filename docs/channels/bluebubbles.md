@@ -18,7 +18,7 @@ Status: bundled plugin that talks to the BlueBubbles macOS server over HTTP. **R
 - OpenClaw talks to it through its REST API (`GET /api/v1/ping`, `POST /message/text`, `POST /chat/:id/*`).
 - Incoming messages arrive via webhooks; outgoing replies, typing indicators, read receipts, and tapbacks are REST calls.
 - Attachments and stickers are ingested as inbound media (and surfaced to the agent when possible).
-- Pairing/allowlist works the same way as other channels (`/start/pairing` etc) with `channels.bluebubbles.allowFrom` + pairing codes.
+- Pairing/allowlist works the same way as other channels (`/channels/pairing` etc) with `channels.bluebubbles.allowFrom` + pairing codes.
 - Reactions are surfaced as system events just like Slack/Telegram so agents can "mention" them before replying.
 - Advanced features: edit, unsend, reply threading, message effects, group management.
 
@@ -27,6 +27,7 @@ Status: bundled plugin that talks to the BlueBubbles macOS server over HTTP. **R
 1. Install the BlueBubbles server on your Mac (follow the instructions at [bluebubbles.app/install](https://bluebubbles.app/install)).
 2. In the BlueBubbles config, enable the web API and set a password.
 3. Run `openclaw onboard` and select BlueBubbles, or configure manually:
+
    ```json5
    {
      channels: {
@@ -39,12 +40,93 @@ Status: bundled plugin that talks to the BlueBubbles macOS server over HTTP. **R
      },
    }
    ```
+
 4. Point BlueBubbles webhooks to your gateway (example: `https://your-gateway-host:3000/bluebubbles-webhook?password=<password>`).
 5. Start the gateway; it will register the webhook handler and start pairing.
 
+Security note:
+
+- Always set a webhook password.
+- Webhook authentication is always required. OpenClaw rejects BlueBubbles webhook requests unless they include a password/guid that matches `channels.bluebubbles.password` (for example `?password=<password>` or `x-password`), regardless of loopback/proxy topology.
+- Password authentication is checked before reading/parsing full webhook bodies.
+
+## Keeping Messages.app alive (VM / headless setups)
+
+Some macOS VM / always-on setups can end up with Messages.app going “idle” (incoming events stop until the app is opened/foregrounded). A simple workaround is to **poke Messages every 5 minutes** using an AppleScript + LaunchAgent.
+
+### 1) Save the AppleScript
+
+Save this as:
+
+- `~/Scripts/poke-messages.scpt`
+
+Example script (non-interactive; does not steal focus):
+
+```applescript
+try
+  tell application "Messages"
+    if not running then
+      launch
+    end if
+
+    -- Touch the scripting interface to keep the process responsive.
+    set _chatCount to (count of chats)
+  end tell
+on error
+  -- Ignore transient failures (first-run prompts, locked session, etc).
+end try
+```
+
+### 2) Install a LaunchAgent
+
+Save this as:
+
+- `~/Library/LaunchAgents/com.user.poke-messages.plist`
+
+```xml
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+  <dict>
+    <key>Label</key>
+    <string>com.user.poke-messages</string>
+
+    <key>ProgramArguments</key>
+    <array>
+      <string>/bin/bash</string>
+      <string>-lc</string>
+      <string>/usr/bin/osascript &quot;$HOME/Scripts/poke-messages.scpt&quot;</string>
+    </array>
+
+    <key>RunAtLoad</key>
+    <true/>
+
+    <key>StartInterval</key>
+    <integer>300</integer>
+
+    <key>StandardOutPath</key>
+    <string>/tmp/poke-messages.log</string>
+    <key>StandardErrorPath</key>
+    <string>/tmp/poke-messages.err</string>
+  </dict>
+</plist>
+```
+
+Notes:
+
+- This runs **every 300 seconds** and **on login**.
+- The first run may trigger macOS **Automation** prompts (`osascript` → Messages). Approve them in the same user session that runs the LaunchAgent.
+
+Load it:
+
+```bash
+launchctl unload ~/Library/LaunchAgents/com.user.poke-messages.plist 2>/dev/null || true
+launchctl load ~/Library/LaunchAgents/com.user.poke-messages.plist
+```
+
 ## Onboarding
 
-BlueBubbles is available in the interactive setup wizard:
+BlueBubbles is available in interactive onboarding:
 
 ```
 openclaw onboard
@@ -73,12 +155,31 @@ DMs:
 - Approve via:
   - `openclaw pairing list bluebubbles`
   - `openclaw pairing approve bluebubbles <CODE>`
-- Pairing is the default token exchange. Details: [Pairing](/start/pairing)
+- Pairing is the default token exchange. Details: [Pairing](/channels/pairing)
 
 Groups:
 
 - `channels.bluebubbles.groupPolicy = open | allowlist | disabled` (default: `allowlist`).
 - `channels.bluebubbles.groupAllowFrom` controls who can trigger in groups when `allowlist` is set.
+
+### Contact name enrichment (macOS, optional)
+
+BlueBubbles group webhooks often only include raw participant addresses. If you want `GroupMembers` context to show local contact names instead, you can opt in to local Contacts enrichment on macOS:
+
+- `channels.bluebubbles.enrichGroupParticipantsFromContacts = true` enables the lookup. Default: `false`.
+- Lookups run only after group access, command authorization, and mention gating have allowed the message through.
+- Only unnamed phone participants are enriched.
+- Raw phone numbers remain as the fallback when no local match is found.
+
+```json5
+{
+  channels: {
+    bluebubbles: {
+      enrichGroupParticipantsFromContacts: true,
+    },
+  },
+}
+```
 
 ### Mention gating (groups)
 
@@ -110,6 +211,60 @@ Per-group configuration:
 - Control commands (e.g., `/config`, `/model`) require authorization.
 - Uses `allowFrom` and `groupAllowFrom` to determine command authorization.
 - Authorized senders can run control commands even without mentioning in groups.
+
+## ACP conversation bindings
+
+BlueBubbles chats can be turned into durable ACP workspaces without changing the transport layer.
+
+Fast operator flow:
+
+- Run `/acp spawn codex --bind here` inside the DM or allowed group chat.
+- Future messages in that same BlueBubbles conversation route to the spawned ACP session.
+- `/new` and `/reset` reset the same bound ACP session in place.
+- `/acp close` closes the ACP session and removes the binding.
+
+Configured persistent bindings are also supported through top-level `bindings[]` entries with `type: "acp"` and `match.channel: "bluebubbles"`.
+
+`match.peer.id` can use any supported BlueBubbles target form:
+
+- normalized DM handle such as `+15555550123` or `user@example.com`
+- `chat_id:<id>`
+- `chat_guid:<guid>`
+- `chat_identifier:<identifier>`
+
+For stable group bindings, prefer `chat_id:*` or `chat_identifier:*`.
+
+Example:
+
+```json5
+{
+  agents: {
+    list: [
+      {
+        id: "codex",
+        runtime: {
+          type: "acp",
+          acp: { agent: "codex", backend: "acpx", mode: "persistent" },
+        },
+      },
+    ],
+  },
+  bindings: [
+    {
+      type: "acp",
+      agentId: "codex",
+      match: {
+        channel: "bluebubbles",
+        accountId: "default",
+        peer: { kind: "dm", id: "+15555550123" },
+      },
+      acp: { label: "codex-imessage" },
+    },
+  ],
+}
+```
+
+See [ACP Agents](/tools/acp-agents) for shared ACP binding behavior.
 
 ## Typing + read receipts
 
@@ -165,8 +320,9 @@ Available actions:
 - **addParticipant**: Add someone to a group (`chatGuid`, `address`)
 - **removeParticipant**: Remove someone from a group (`chatGuid`, `address`)
 - **leaveGroup**: Leave a group chat (`chatGuid`)
-- **sendAttachment**: Send media/files (`to`, `buffer`, `filename`, `asVoice`)
+- **upload-file**: Send media/files (`to`, `buffer`, `filename`, `asVoice`)
   - Voice memos: set `asVoice: true` with **MP3** or **CAF** audio to send as an iMessage voice message. BlueBubbles converts MP3 → CAF when sending voice memos.
+- Legacy alias: `sendAttachment` still works, but `upload-file` is the canonical action name.
 
 ### Message IDs (short vs full)
 
@@ -201,7 +357,7 @@ Control whether responses are sent as a single message or streamed in blocks:
 ## Media + limits
 
 - Inbound attachments are downloaded and stored in the media cache.
-- Media cap via `channels.bluebubbles.mediaMaxMb` (default: 8 MB).
+- Media cap via `channels.bluebubbles.mediaMaxMb` for inbound and outbound media (default: 8 MB).
 - Outbound text is chunked to `channels.bluebubbles.textChunkLimit` (default: 4000 chars).
 
 ## Configuration reference
@@ -218,12 +374,14 @@ Provider options:
 - `channels.bluebubbles.allowFrom`: DM allowlist (handles, emails, E.164 numbers, `chat_id:*`, `chat_guid:*`).
 - `channels.bluebubbles.groupPolicy`: `open | allowlist | disabled` (default: `allowlist`).
 - `channels.bluebubbles.groupAllowFrom`: Group sender allowlist.
+- `channels.bluebubbles.enrichGroupParticipantsFromContacts`: On macOS, optionally enrich unnamed group participants from local Contacts after gating passes. Default: `false`.
 - `channels.bluebubbles.groups`: Per-group config (`requireMention`, etc.).
 - `channels.bluebubbles.sendReadReceipts`: Send read receipts (default: `true`).
 - `channels.bluebubbles.blockStreaming`: Enable block streaming (default: `false`; required for streaming replies).
 - `channels.bluebubbles.textChunkLimit`: Outbound chunk size in chars (default: 4000).
 - `channels.bluebubbles.chunkMode`: `length` (default) splits only when exceeding `textChunkLimit`; `newline` splits on blank lines (paragraph boundaries) before length chunking.
-- `channels.bluebubbles.mediaMaxMb`: Inbound media cap in MB (default: 8).
+- `channels.bluebubbles.mediaMaxMb`: Inbound/outbound media cap in MB (default: 8).
+- `channels.bluebubbles.mediaLocalRoots`: Explicit allowlist of absolute local directories permitted for outbound local media paths. Local path sends are denied by default unless this is configured. Per-account override: `channels.bluebubbles.accounts.<accountId>.mediaLocalRoots`.
 - `channels.bluebubbles.historyLimit`: Max group messages for context (0 disables).
 - `channels.bluebubbles.dmHistoryLimit`: DM history limit.
 - `channels.bluebubbles.actions`: Enable/disable specific actions.
@@ -261,4 +419,12 @@ Prefer `chat_guid` for stable routing:
 - OpenClaw auto-hides known-broken actions based on the BlueBubbles server's macOS version. If edit still appears on macOS 26 (Tahoe), disable it manually with `channels.bluebubbles.actions.edit=false`.
 - For status/health info: `openclaw status --all` or `openclaw status --deep`.
 
-For general channel workflow reference, see [Channels](/channels) and the [Plugins](/plugins) guide.
+For general channel workflow reference, see [Channels](/channels) and the [Plugins](/tools/plugin) guide.
+
+## Related
+
+- [Channels Overview](/channels) — all supported channels
+- [Pairing](/channels/pairing) — DM authentication and pairing flow
+- [Groups](/channels/groups) — group chat behavior and mention gating
+- [Channel Routing](/channels/channel-routing) — session routing for messages
+- [Security](/gateway/security) — access model and hardening

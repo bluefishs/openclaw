@@ -22,10 +22,10 @@ openclaw plugins install @openclaw/twitch
 Local checkout (when running from a git repo):
 
 ```bash
-openclaw plugins install ./extensions/twitch
+openclaw plugins install ./path/to/local/twitch-plugin
 ```
 
-Details: [Plugins](/plugin)
+Details: [Plugins](/tools/plugin)
 
 ## Quick setup (beginner)
 
@@ -34,7 +34,7 @@ Details: [Plugins](/plugin)
    - Select **Bot Token**
    - Verify scopes `chat:read` and `chat:write` are selected
    - Copy the **Client ID** and **Access Token**
-3. Find your Twitch user ID: https://www.streamweasels.com/tools/convert-twitch-username-to-user-id/
+3. Find your Twitch user ID: [https://www.streamweasels.com/tools/convert-twitch-username-to-user-id/](https://www.streamweasels.com/tools/convert-twitch-username-to-user-id/)
 4. Configure the token:
    - Env: `OPENCLAW_TWITCH_ACCESS_TOKEN=...` (default account only)
    - Or config: `channels.twitch.accessToken`
@@ -123,7 +123,7 @@ Prefer `allowFrom` for a hard allowlist. Use `allowedRoles` instead if you want 
 
 **Why user IDs?** Usernames can change, allowing impersonation. User IDs are permanent.
 
-Find your Twitch user ID: https://www.streamweasels.com/tools/convert-twitch-username-%20to-user-id/ (Convert your Twitch username to ID)
+Find your Twitch user ID: [https://www.streamweasels.com/tools/convert-twitch-username-to-user-id/](https://www.streamweasels.com/tools/convert-twitch-username-to-user-id/) (Convert your Twitch username to ID)
 
 ## Token refresh (optional)
 
@@ -255,7 +255,7 @@ openclaw doctor
 openclaw channels status --probe
 ```
 
-### Bot doesn't respond to messages
+### Bot does not respond to messages
 
 **Check access control:** Ensure your user ID is in `allowFrom`, or temporarily remove
 `allowFrom` and set `allowedRoles: ["all"]` to test.
@@ -377,3 +377,11 @@ Example:
 - **500 characters** per message (auto-chunked at word boundaries)
 - Markdown is stripped before chunking
 - No rate limiting (uses Twitch's built-in rate limits)
+
+## Related
+
+- [Channels Overview](/channels) — all supported channels
+- [Pairing](/channels/pairing) — DM authentication and pairing flow
+- [Groups](/channels/groups) — group chat behavior and mention gating
+- [Channel Routing](/channels/channel-routing) — session routing for messages
+- [Security](/gateway/security) — access model and hardening

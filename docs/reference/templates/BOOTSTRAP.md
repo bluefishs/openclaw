@@ -1,4 +1,5 @@
 ---
+title: "BOOTSTRAP.md Template"
 summary: "First-run ritual for new agents"
 read_when:
   - Bootstrapping a workspace manually
@@ -42,13 +43,6 @@ Then open `SOUL.md` together and talk about:
 
 Write it down. Make it real.
 
-## One-time system admin check
-
-Since this is a new install, offer a choice:
-
-1. Run the recommended host healthcheck using the `healthcheck` skill.
-2. Skip for now (run later by saying “run healthcheck”).
-
 ## Connect (Optional)
 
 Ask how they want to reach you:
@@ -59,7 +53,7 @@ Ask how they want to reach you:
 
 Guide them through whichever they pick.
 
-## When You're Done
+## When you are done
 
 Delete this file. You don't need a bootstrap script anymore — you're you now.
 

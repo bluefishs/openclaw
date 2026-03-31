@@ -1,0 +1,19 @@
+{
+  "id": "ck-platform",
+  "name": "CK Platform Integration",
+  "description": "Cross-domain query tool for CK_ platform services via NemoClaw gateway.",
+  "configSchema": {
+    "type": "object",
+    "additionalProperties": false,
+    "properties": {
+      "nemoclawUrl": {
+        "type": "string",
+        "description": "NemoClaw gateway URL override (default: env NEMOCLAW_GATEWAY_URL or http://nemoclaw_tower:9000)"
+      },
+      "subtaskTimeoutMs": {
+        "type": "number",
+        "description": "Timeout per sub-task in milliseconds (default: 120000)"
+      }
+    }
+  }
+}

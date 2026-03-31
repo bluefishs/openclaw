@@ -56,10 +56,13 @@
 
 | 頻道 | 模式 | 外部 URL | 注意事項 |
 |------|------|----------|----------|
-| Telegram (`@Aaron_ckbot`) | **Polling**（零維護） | 不需要 | DNS 已優化至 <1s |
-| LINE (`小花貓Aroan`) | Webhook | ngrok 動態 URL | Tailscale Funnel 缺 HTTP/2 ALPN，LINE 需走 ngrok；需持續運行 |
+| Telegram `@Aaron_ckbot` [default] | **Polling** | 不需要 | 主助理：公文、知識、一般對話 |
+| Telegram `@jujuia_ckbot` [jujuia] | **Polling** | 不需要 | 技術助理：瀏覽器、資料分析、開發 |
+| LINE `小花貓Aroan` | Webhook | ngrok 動態 URL | Tailscale Funnel 缺 HTTP/2 ALPN，LINE 需走 ngrok |
 
-> **Session 模式**: `main`（預設）— LINE 和 Telegram 共享同一對話記憶與功能。如需獨立可改為 `per-channel-peer`。
+> **Session 模式**: `main`（預設）— LINE 和 Telegram 共享同一對話記憶。
+> **語音**: Edge TTS（zh-TW-HsiaoChenNeural）+ 自動語音轉錄。`tts.auto: "inbound"` — 收到語音訊息時回覆語音。
+> **群組**: 兩個 Telegram Bot 可同時在群組中，用 @mention 觸發對應 Bot。功能分工可透過 `groups.<id>.skills` 和 `groups.<id>.systemPrompt` 設定。
 
 ### 自癒機制
 

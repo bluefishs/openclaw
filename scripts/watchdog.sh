@@ -21,6 +21,7 @@ STATE_FILE="${LOG_DIR}/.watchdog-state.json"
 
 # ─── Config ───
 TAILSCALE_URL="https://ck-aaron.tailafa5cd.ts.net"
+NGROK_API="http://127.0.0.1:4040/api/tunnels"
 GATEWAY_LOCAL="http://127.0.0.1:18789"
 CONTAINER_NAME="openclaw_engine"
 CHECK_INTERVAL=300  # 5 minutes (for --loop mode)
@@ -127,11 +128,30 @@ check_tailscale() {
   return 1
 }
 
+check_ngrok() {
+  local url
+  url=$(curl -s "$NGROK_API" 2>/dev/null | \
+    grep -o '"public_url":"https://[^"]*"' | head -1 | cut -d'"' -f4 || true)
+  if [ -n "$url" ]; then
+    return 0
+  fi
+  log "WARN: ngrok not running (LINE webhook depends on it)"
+  return 1
+}
+
 check_line_webhook() {
+  # Get ngrok URL for LINE webhook check
+  local ngrok_url
+  ngrok_url=$(curl -s "$NGROK_API" 2>/dev/null | \
+    grep -o '"public_url":"https://[^"]*"' | head -1 | cut -d'"' -f4 || true)
+  if [ -z "$ngrok_url" ]; then
+    log "WARN: Cannot check LINE webhook — ngrok not running"
+    return 1
+  fi
   local code
   code=$(curl -s -o /dev/null -w "%{http_code}" -X POST \
     -H "Content-Type: application/json" -d '{}' \
-    "${TAILSCALE_URL}/line/webhook" --max-time 10 2>/dev/null || echo "000")
+    "${ngrok_url}/line/webhook" --max-time 10 2>/dev/null || echo "000")
   # 400 = Missing signature (correct behavior)
   if [ "$code" = "400" ] || [ "$code" = "401" ]; then
     return 0
@@ -164,28 +184,34 @@ check_telegram_polling() {
 
 heal_tailscale() {
   log "HEAL: Attempting to restart Tailscale..."
-
-  # Try to bring Tailscale up (Windows: net start Tailscale)
   if command -v tailscale >/dev/null 2>&1; then
     tailscale up --reset 2>/dev/null || true
     sleep 5
-
     if tailscale status >/dev/null 2>&1; then
       log "HEAL: Tailscale restarted successfully"
-
-      # Verify Funnel is reachable
-      local code
-      code=$(curl -s -o /dev/null -w "%{http_code}" "${TAILSCALE_URL}/health" --max-time 10 2>/dev/null || echo "000")
-      if [ "$code" = "200" ]; then
-        log "HEAL: Tailscale Funnel verified (HTTP 200)"
-        return 0
-      fi
-      log "HEAL: Tailscale up but Funnel not reachable (HTTP $code)"
-      return 1
+      return 0
     fi
   fi
-
   log "HEAL FAILED: Tailscale could not be restarted"
+  return 1
+}
+
+heal_ngrok() {
+  log "HEAL: Starting ngrok for LINE webhook..."
+  nohup ngrok http 18789 --log=stdout > "$LOG_DIR/ngrok.log" 2>&1 &
+  sleep 8
+
+  local url
+  url=$(curl -s "$NGROK_API" 2>/dev/null | \
+    grep -o '"public_url":"https://[^"]*"' | head -1 | cut -d'"' -f4 || true)
+
+  if [ -n "$url" ]; then
+    log "HEAL: ngrok started at $url"
+    # Update LINE webhook to ngrok URL
+    bash "$(dirname "$0")/update-line-webhook.sh" 2>/dev/null || true
+    return 0
+  fi
+  log "HEAL FAILED: ngrok did not start"
   return 1
 }
 
@@ -251,25 +277,35 @@ run_checks() {
     fi
   fi
 
-  # 4. Tailscale Funnel
+  # 4. Tailscale (for general connectivity, not LINE)
   if ! check_tailscale; then
     if heal_tailscale; then
       ((healed++))
     else
-      alerts="${alerts}\n🟡 Tailscale Funnel 無法連線"
+      alerts="${alerts}\n🟡 Tailscale 無法連線"
       ((issues++))
     fi
   fi
 
-  # 5. LINE webhook (only if Tailscale is up)
-  if check_tailscale; then
+  # 5. ngrok (required for LINE webhook — Tailscale Funnel lacks HTTP/2 ALPN)
+  if ! check_ngrok; then
+    if heal_ngrok; then
+      ((healed++))
+    else
+      alerts="${alerts}\n🟡 ngrok 無法啟動（LINE webhook 斷線）"
+      ((issues++))
+    fi
+  fi
+
+  # 6. LINE webhook (only if ngrok is up)
+  if check_ngrok; then
     if ! check_line_webhook; then
       alerts="${alerts}\n🟡 LINE webhook 端點異常"
       ((issues++))
     fi
   fi
 
-  # 6. Telegram polling
+  # 7. Telegram polling
   if ! check_telegram_polling; then
     alerts="${alerts}\n🟡 Telegram polling 不穩定"
     ((issues++))

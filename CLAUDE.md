@@ -57,7 +57,7 @@
 | 頻道 | 模式 | 外部 URL | 注意事項 |
 |------|------|----------|----------|
 | Telegram (`@Aaron_ckbot`) | **Polling**（零維護） | 不需要 | DNS 已優化至 <1s |
-| LINE (`小花貓Aroan`) | Webhook | Tailscale Funnel 固定 URL | 需 Tailscale 運行；delivery suspension 需手動 toggle |
+| LINE (`小花貓Aroan`) | Webhook | ngrok 動態 URL | Tailscale Funnel 缺 HTTP/2 ALPN，LINE 需走 ngrok；需持續運行 |
 
 > **Session 模式**: `main`（預設）— LINE 和 Telegram 共享同一對話記憶與功能。如需獨立可改為 `per-channel-peer`。
 
@@ -65,10 +65,10 @@
 
 ```
 開機 → scripts/startup.bat
-  → 等待 Docker → Container healthy → 確認 Tailscale Funnel → 驗證 LINE webhook → 啟動 watchdog
-  → watchdog 每 5 分鐘：偵測 6 項 → 自動修復 → 修不了才 Telegram 告警
+  → 等待 Docker → Container healthy → 確認 Tailscale → 啟動 ngrok → 更新 LINE webhook → 啟動 watchdog
+  → watchdog 每 5 分鐘：偵測 7 項 → 自動修復 → 修不了才 Telegram 告警
 
-偵測項目：Docker Engine → Container Health → Gateway HTTP → Tailscale Funnel → LINE Webhook → Telegram Polling
+偵測項目：Docker Engine → Container Health → Gateway HTTP → Tailscale → ngrok → LINE Webhook → Telegram Polling
 ```
 
 安裝：以管理員執行 `scripts\install-startup-task.bat`

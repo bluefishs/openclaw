@@ -1,18 +1,23 @@
 #!/bin/bash
-# 確認 LINE webhook 指向 Tailscale Funnel 固定 URL
+# 偵測 ngrok URL 並更新 LINE webhook
+# LINE 平台需要 HTTP/2 ALPN，Tailscale Funnel 不支援，因此 LINE 走 ngrok
 # 由 startup.bat 和 watchdog.sh 呼叫
 
 set -euo pipefail
 
 CONTAINER_NAME="openclaw_engine"
-TAILSCALE_URL="https://ck-aaron.tailafa5cd.ts.net"
-WEBHOOK_ENDPOINT="${TAILSCALE_URL}/line/webhook"
+NGROK_API="http://127.0.0.1:4040/api/tunnels"
 
-# Verify Tailscale is running
-if ! tailscale status >/dev/null 2>&1; then
-  echo "[update-line-webhook] Tailscale not running, skipping"
+# Get ngrok public URL
+NGROK_URL=$(curl -s "$NGROK_API" 2>/dev/null | \
+  grep -o '"public_url":"https://[^"]*"' | head -1 | cut -d'"' -f4 || true)
+
+if [ -z "$NGROK_URL" ]; then
+  echo "[update-line-webhook] ngrok not running, skipping"
   exit 1
 fi
+
+WEBHOOK_ENDPOINT="${NGROK_URL}/line/webhook"
 
 # Get LINE token from container config
 LINE_TOKEN=$(docker exec "$CONTAINER_NAME" sh -c \
@@ -34,7 +39,7 @@ if [ "$CURRENT" = "$WEBHOOK_ENDPOINT" ]; then
   exit 0
 fi
 
-# Update to Tailscale Funnel URL
+# Update to ngrok URL
 curl -s -X PUT \
   -H "Authorization: Bearer $LINE_TOKEN" \
   -H "Content-Type: application/json" \

@@ -32,19 +32,31 @@ if not "%HEALTH%"=="healthy" (
 echo openclaw_engine is healthy.
 echo [%date% %time%] openclaw_engine healthy >> "%LOG_DIR%\startup.log"
 
-REM 3. Verify Tailscale Funnel (LINE webhook)
-echo Checking Tailscale Funnel...
+REM 3. Verify Tailscale (general connectivity)
+echo Checking Tailscale...
 tailscale status >nul 2>&1
 if errorlevel 1 (
-  echo WARNING: Tailscale not running! LINE webhook will be unreachable.
+  echo WARNING: Tailscale not running.
   echo [%date% %time%] WARNING: Tailscale not running >> "%LOG_DIR%\startup.log"
 ) else (
   echo Tailscale active.
   echo [%date% %time%] Tailscale active >> "%LOG_DIR%\startup.log"
 )
 
-REM 4. Verify LINE webhook URL (Tailscale Funnel)
-echo Verifying LINE webhook...
+REM 4. Start ngrok (LINE webhook requires HTTP/2 ALPN, Tailscale Funnel lacks it)
+echo Starting ngrok for LINE webhook...
+tasklist /FI "IMAGENAME eq ngrok.exe" 2>nul | find /I "ngrok.exe" >nul
+if errorlevel 1 (
+  start /B "" ngrok http 18789 > "%LOG_DIR%\ngrok-startup.log" 2>&1
+  timeout /t 8 /nobreak >nul
+  echo ngrok started.
+  echo [%date% %time%] ngrok started >> "%LOG_DIR%\startup.log"
+) else (
+  echo ngrok already running.
+)
+
+REM 5. Update LINE webhook URL (via ngrok)
+echo Updating LINE webhook...
 bash "%SCRIPT_DIR%update-line-webhook.sh" >> "%LOG_DIR%\startup.log" 2>&1
 
 REM 5. Start watchdog background

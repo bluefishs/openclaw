@@ -317,6 +317,10 @@ export type AppViewState = {
     overviewShowGatewayPassword: boolean;
     overviewLogLines: string[];
     overviewLogCursor: number;
+    // System metrics (from /metrics HTTP endpoint)
+    metricsResult: import("./controllers/metrics.ts").MetricsResult | null;
+    metricsLoading: boolean;
+    metricsError: string | null;
     client: GatewayBrowserClient | null;
     refreshSessionsAfterChat: Set<string>;
     connect: () => void;

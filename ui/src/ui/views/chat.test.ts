@@ -227,6 +227,7 @@ function createOverviewProps(overrides: Partial<OverviewProps> = {}): OverviewPr
     cronJobs: [],
     cronStatus: null,
     attentionItems: [],
+    metricsProps: { metrics: null, loading: false, error: null },
     eventLog: [],
     overviewLogLines: [],
     showGatewayToken: false,

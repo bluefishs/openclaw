@@ -3,6 +3,7 @@ import fs from "node:fs";
 import type { AgentMessage } from "@mariozechner/pi-agent-core";
 import { resolveBootstrapWarningSignaturesSeen } from "../../agents/bootstrap-budget.js";
 import { estimateMessagesTokens } from "../../agents/compaction.js";
+import { microcompact, recordMicrocompactMetrics } from "../../agents/microcompact.js";
 import { runWithModelFallback } from "../../agents/model-fallback.js";
 import { isCliProvider } from "../../agents/model-selection.js";
 import { compactEmbeddedPiSession, runEmbeddedPiAgent } from "../../agents/pi-embedded.js";
@@ -264,13 +265,22 @@ function estimatePromptTokensFromSessionTranscript(params: {
     return undefined;
   }
   try {
-    const messages = readSessionMessages(
+    const rawMessages = readSessionMessages(
       sessionId,
       params.storePath,
       params.sessionFile,
     ) as AgentMessage[];
-    if (messages.length === 0) {
+    if (rawMessages.length === 0) {
       return undefined;
+    }
+    // Microcompact: rule-based cleanup before token estimation (<1ms, zero LLM cost)
+    const { messages, stats: mcStats } = microcompact(rawMessages);
+    recordMicrocompactMetrics(rawMessages.length, messages.length, mcStats);
+    if (mcStats.charsSaved > 0) {
+      logVerbose(
+        `microcompact: truncated=${mcStats.truncated} stripped=${mcStats.stripped} ` +
+          `collapsed=${mcStats.collapsed} charsSaved=${mcStats.charsSaved}`,
+      );
     }
     const estimatedTokens = estimateMessagesTokens(messages);
     if (!Number.isFinite(estimatedTokens) || estimatedTokens <= 0) {

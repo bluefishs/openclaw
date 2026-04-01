@@ -252,12 +252,15 @@ export function connectGateway(host: GatewayHost, options?: ConnectGatewayOption
       void loadNodes(host as unknown as OpenClawApp, { quiet: true });
       void loadDevices(host as unknown as OpenClawApp, { quiet: true });
       void refreshActiveTab(host as unknown as Parameters<typeof refreshActiveTab>[0]);
+      // Start periodic metrics fetch (system observability)
+      (host as unknown as OpenClawApp).startMetricsAutoRefresh();
     },
     onClose: ({ code, reason, error }) => {
       if (host.client !== client) {
         return;
       }
       host.connected = false;
+      (host as unknown as OpenClawApp).stopMetricsAutoRefresh();
       // Code 1012 = Service Restart (expected during config saves, don't show as error)
       host.lastErrorCode =
         resolveGatewayErrorDetailCode(error) ??

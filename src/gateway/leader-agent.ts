@@ -231,6 +231,23 @@ function recordCircuitFailure(agentId: string): void {
   }
 }
 
+/** Exported snapshot of all circuit breaker states for observability. */
+export function getCircuitBreakerStats(): Record<
+  string,
+  { state: string; consecutiveFailures: number; lastFailureAt: number }
+> {
+  const out: Record<string, { state: string; consecutiveFailures: number; lastFailureAt: number }> =
+    {};
+  for (const [agentId, cs] of circuitStates) {
+    out[agentId] = {
+      state: cs.state,
+      consecutiveFailures: cs.consecutiveFailures,
+      lastFailureAt: cs.lastFailureAt,
+    };
+  }
+  return out;
+}
+
 // ─── Default Domain Agents (migrated from hardcoded const) ───
 
 const DEFAULT_DOMAIN_AGENTS: AgentCapability[] = [

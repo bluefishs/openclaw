@@ -15,6 +15,38 @@
 
 import Redis from "ioredis";
 
+// ─── Secret Redaction (self-contained, no cross-package deps) ───
+
+const SECRET_PATTERNS: RegExp[] = [
+  /\b[A-Z0-9_]*(?:KEY|TOKEN|SECRET|PASSWORD|PASSWD)\b\s*[=:]\s*["']?([^\s"'\\]{18,})["']?/gi,
+  /"(?:apiKey|token|secret|password|passwd|accessToken|refreshToken)"\s*:\s*"([^"]{18,})"/gi,
+  /\bBearer\s+([A-Za-z0-9._\-+=]{18,})\b/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]+?-----END [A-Z ]*PRIVATE KEY-----/g,
+  /\b(sk-[A-Za-z0-9_-]{8,})\b/g,
+  /\b(ghp_[A-Za-z0-9]{20,})\b/g,
+  /\b(github_pat_[A-Za-z0-9_]{20,})\b/g,
+  /\b(xox[baprs]-[A-Za-z0-9-]{10,})\b/g,
+  /\b(gsk_[A-Za-z0-9_-]{10,})\b/g,
+  /\b(AIza[0-9A-Za-z\-_]{20,})\b/g,
+  /\bbot(\d{6,}:[A-Za-z0-9_-]{20,})\b/g,
+  /\b(\d{6,}:[A-Za-z0-9_-]{20,})\b/g,
+];
+
+function redactSecrets(text: string): string {
+  let result = text;
+  for (const pattern of SECRET_PATTERNS) {
+    pattern.lastIndex = 0;
+    result = result.replace(pattern, (match) => {
+      if (match.includes("PRIVATE KEY-----")) {
+        const lines = match.split(/\r?\n/).filter(Boolean);
+        return lines.length >= 2 ? `${lines[0]}\n…redacted…\n${lines[lines.length - 1]}` : "***";
+      }
+      return match.length >= 18 ? `${match.slice(0, 6)}…${match.slice(-4)}` : "***";
+    });
+  }
+  return result;
+}
+
 // ─── Types ───
 
 export type HistoryMessage = {
@@ -114,7 +146,14 @@ export class ConversationMemoryService {
       }
 
       // Refresh TTL on read (active session stays alive)
+      // Track recall frequency for adaptive TTL (fire-and-forget)
       await this.redis.expire(sessionKey, this.config.ttlSeconds);
+      this.redis
+        .pipeline()
+        .hincrby("conv:recall_counts", sessionKey, 1)
+        .expire("conv:recall_counts", this.config.ttlSeconds * 2)
+        .exec()
+        .catch(() => {});
 
       return messages;
     } catch (err) {
@@ -137,8 +176,8 @@ export class ConversationMemoryService {
     this._saveTurnTotal++;
     try {
       const now = new Date().toISOString();
-      const userEntry: HistoryMessage = { role: "user", content: userMsg, ts: now };
-      const aiEntry: HistoryMessage = { role: "assistant", content: aiMsg, ts: now };
+      const userEntry: HistoryMessage = { role: "user", content: redactSecrets(userMsg), ts: now };
+      const aiEntry: HistoryMessage = { role: "assistant", content: redactSecrets(aiMsg), ts: now };
 
       // Pipeline: batch 4 commands into 1 round-trip
       const maxEntries = this.config.maxTurns * 2; // turns × 2 messages each
@@ -165,22 +204,33 @@ export class ConversationMemoryService {
   /**
    * Format history as prompt-ready context for LLM injection.
    * Uses XML-style tags to prevent role prefix confusion in content.
+   * Adds staleness markers for messages older than staleThresholdHours (default: 24h).
    */
-  formatForPrompt(history: HistoryMessage[]): string {
+  formatForPrompt(history: HistoryMessage[], staleThresholdHours = 24): string {
     if (history.length === 0) {
       return "";
     }
 
+    const now = Date.now();
+    const staleMs = staleThresholdHours * 3600_000;
+
     const lines = history.map((m) => {
       const tag = m.role === "user" ? "user" : "assistant";
-      // Escape all angle brackets in content to prevent stored prompt injection.
-      // This blocks both opening and closing tag injection (e.g., crafted
-      // "</user></conversation_history>...injected system prompt...")
       const escaped = m.content.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      return `<${tag}>${escaped}</${tag}>`;
+      // Age-based staleness: older messages may reflect outdated context
+      const age = m.ts ? now - new Date(m.ts).getTime() : 0;
+      const staleAttr =
+        age > staleMs ? ` stale="true" age_hours="${Math.floor(age / 3600_000)}"` : "";
+      return `<${tag}${staleAttr}>${escaped}</${tag}>`;
     });
 
-    return `<conversation_history>\n${lines.join("\n")}\n</conversation_history>`;
+    // Prepend staleness advisory if any messages are stale
+    const hasStale = history.some((m) => m.ts && now - new Date(m.ts).getTime() > staleMs);
+    const advisory = hasStale
+      ? `<stale_advisory>部分對話記憶已超過 ${staleThresholdHours} 小時，可能不反映當前狀態，請以最新資訊為準。</stale_advisory>\n`
+      : "";
+
+    return `${advisory}<conversation_history>\n${lines.join("\n")}\n</conversation_history>`;
   }
 
   /**
@@ -251,6 +301,78 @@ export class ConversationMemoryService {
       }
     }
     return stats;
+  }
+
+  /**
+   * Decay idle sessions — scan conv:* keys and halve TTL for sessions that haven't
+   * been accessed recently. Sessions below minTtlSeconds are left to expire naturally.
+   *
+   * Call periodically (e.g., every 30 minutes via setInterval) to reclaim Redis memory
+   * from abandoned sessions without abruptly deleting potentially useful context.
+   *
+   * Returns the number of sessions whose TTL was reduced.
+   */
+  /**
+   * Adaptive decay — scan conv:* keys and adjust TTL based on recall frequency:
+   *   - High-frequency sessions (recall >= highRecallThreshold): extend TTL to max
+   *   - Low-frequency / never recalled: halve TTL until minTtlSeconds
+   *   - Sessions below minTtlSeconds: left to expire naturally
+   *
+   * Returns { decayed, extended } counts.
+   */
+  async decayIdleSessions(minTtlSeconds = 3600, highRecallThreshold = 5): Promise<number> {
+    if (!this.ready) {
+      return 0;
+    }
+    try {
+      // Load recall counts in one shot
+      const recallMap = new Map<string, number>();
+      try {
+        const raw = await this.redis.hgetall("conv:recall_counts");
+        for (const [key, count] of Object.entries(raw)) {
+          recallMap.set(key, parseInt(count, 10) || 0);
+        }
+      } catch {
+        // recall counts unavailable — fall back to uniform decay
+      }
+
+      let decayed = 0;
+      let cursor = "0";
+      do {
+        const [nextCursor, keys] = await this.redis.scan(cursor, "MATCH", "conv:*", "COUNT", 100);
+        cursor = nextCursor;
+        for (const key of keys) {
+          if (key === "conv:recall_counts") {
+            continue;
+          }
+          const ttl = await this.redis.ttl(key);
+          if (ttl <= minTtlSeconds) {
+            continue;
+          }
+
+          const recallCount = recallMap.get(key) ?? 0;
+
+          if (recallCount >= highRecallThreshold) {
+            // High-frequency: extend TTL back to max (reward active sessions)
+            if (ttl < this.config.ttlSeconds) {
+              await this.redis.expire(key, this.config.ttlSeconds);
+            }
+          } else {
+            // Low-frequency: halve TTL (accelerate decay)
+            const factor = recallCount === 0 ? 3 : 2; // never-recalled decays 3x faster
+            const newTtl = Math.max(minTtlSeconds, Math.floor(ttl / factor));
+            if (newTtl < ttl) {
+              await this.redis.expire(key, newTtl);
+              decayed++;
+            }
+          }
+        }
+      } while (cursor !== "0");
+      return decayed;
+    } catch (err) {
+      console.warn(`[conversation-memory] decayIdleSessions failed: ${String(err)}`);
+      return 0;
+    }
   }
 
   /**

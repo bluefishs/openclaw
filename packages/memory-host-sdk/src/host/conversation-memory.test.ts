@@ -39,6 +39,10 @@ function createMockRedis() {
         ops.push(() => ttls.set(key, seconds));
         return chain;
       },
+      hincrby(_key: string, _field: string, _increment: number) {
+        ops.push(() => {}); // no-op for recall tracking in tests
+        return chain;
+      },
       async exec() {
         for (const op of ops) {
           op();
@@ -122,9 +126,10 @@ describe("ConversationMemoryService", () => {
     });
 
     it("wraps messages in XML-style tags", () => {
+      const now = new Date().toISOString();
       const history: HistoryMessage[] = [
-        { role: "user", content: "Hello", ts: "2026-01-01T00:00:00Z" },
-        { role: "assistant", content: "Hi there", ts: "2026-01-01T00:00:01Z" },
+        { role: "user", content: "Hello", ts: now },
+        { role: "assistant", content: "Hi there", ts: now },
       ];
       const result = svc.formatForPrompt(history);
       expect(result).toBe(
@@ -370,6 +375,102 @@ describe("ConversationMemoryService", () => {
       mock._store.set("conv:a:b", [JSON.stringify({ role: "user", content: "x", ts: "t" })]);
       const result = await svc.loadContext("conv:a:b");
       expect(result).toHaveLength(1);
+    });
+  });
+
+  // ── Secret redaction in saveTurn ──
+
+  describe("secret redaction", () => {
+    it("redacts OpenAI-style API keys in user messages", async () => {
+      await svc.saveTurn("conv:a:b", "my key is sk-proj-abcdefghijklmnopqrstuvwxyz12345678", "ok");
+      const stored = mock._store.get("conv:a:b")!;
+      const user = JSON.parse(stored[0]) as HistoryMessage;
+      expect(user.content).not.toContain("sk-proj-abcdefghijklmnopqrstuvwxyz12345678");
+    });
+
+    it("redacts GitHub PATs", async () => {
+      await svc.saveTurn("conv:a:b", "token: ghp_ABCDEFGHIJKLMNOPQRSTuvwx", "noted");
+      const stored = mock._store.get("conv:a:b")!;
+      const user = JSON.parse(stored[0]) as HistoryMessage;
+      expect(user.content).not.toContain("ghp_ABCDEFGHIJKLMNOPQRSTuvwx");
+    });
+
+    it("redacts Bearer tokens", async () => {
+      await svc.saveTurn(
+        "conv:a:b",
+        "Authorization: Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.payload.sig",
+        "ok",
+      );
+      const stored = mock._store.get("conv:a:b")!;
+      const user = JSON.parse(stored[0]) as HistoryMessage;
+      expect(user.content).not.toContain("eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9");
+    });
+
+    it("redacts Telegram bot tokens", async () => {
+      await svc.saveTurn("conv:a:b", "use bot1234567890:ABCDefghIJKLmnopQRSTuvwxYZ", "ok");
+      const stored = mock._store.get("conv:a:b")!;
+      const user = JSON.parse(stored[0]) as HistoryMessage;
+      expect(user.content).not.toContain("1234567890:ABCDefghIJKLmnopQRSTuvwxYZ");
+    });
+
+    it("redacts secrets in assistant messages too", async () => {
+      await svc.saveTurn("conv:a:b", "what key?", "your key is sk-abcdefghijklmnop");
+      const stored = mock._store.get("conv:a:b")!;
+      const assistant = JSON.parse(stored[1]) as HistoryMessage;
+      expect(assistant.content).not.toContain("sk-abcdefghijklmnop");
+    });
+
+    it("preserves normal messages without secrets", async () => {
+      await svc.saveTurn("conv:a:b", "hello world", "hi there");
+      const stored = mock._store.get("conv:a:b")!;
+      const user = JSON.parse(stored[0]) as HistoryMessage;
+      expect(user.content).toBe("hello world");
+    });
+  });
+
+  // ── Stale markers in formatForPrompt ──
+
+  describe("stale markers", () => {
+    it("marks messages older than threshold as stale", () => {
+      const oldTs = new Date(Date.now() - 48 * 3600_000).toISOString(); // 48h ago
+      const history: HistoryMessage[] = [{ role: "user", content: "old message", ts: oldTs }];
+      const result = svc.formatForPrompt(history, 24);
+      expect(result).toContain('stale="true"');
+      expect(result).toContain("stale_advisory");
+    });
+
+    it("does not mark recent messages as stale", () => {
+      const recentTs = new Date().toISOString();
+      const history: HistoryMessage[] = [{ role: "user", content: "fresh message", ts: recentTs }];
+      const result = svc.formatForPrompt(history, 24);
+      expect(result).not.toContain('stale="true"');
+      expect(result).not.toContain("stale_advisory");
+    });
+
+    it("includes age_hours attribute on stale messages", () => {
+      const ts72hAgo = new Date(Date.now() - 72 * 3600_000).toISOString();
+      const history: HistoryMessage[] = [{ role: "user", content: "very old", ts: ts72hAgo }];
+      const result = svc.formatForPrompt(history, 24);
+      expect(result).toMatch(/age_hours="7[0-3]"/); // ~72h
+    });
+
+    it("uses default 24h threshold", () => {
+      const ts25hAgo = new Date(Date.now() - 25 * 3600_000).toISOString();
+      const history: HistoryMessage[] = [{ role: "user", content: "slightly old", ts: ts25hAgo }];
+      const result = svc.formatForPrompt(history);
+      expect(result).toContain('stale="true"');
+    });
+  });
+
+  // ── decayIdleSessions ──
+
+  describe("decayIdleSessions", () => {
+    it("returns 0 when not ready", async () => {
+      const notReady = new ConversationMemoryService(mock as never, {
+        maxTurns: 20,
+        ttlSeconds: 86400,
+      });
+      expect(await notReady.decayIdleSessions()).toBe(0);
     });
   });
 });

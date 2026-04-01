@@ -9,6 +9,7 @@
  * Call `shutdownGstack()` during gateway shutdown to clean up timers.
  */
 
+import type { ConversationMemoryService } from "../memory/conversation-memory.js";
 import type { TaskTrackerService } from "../memory/task-tracker.js";
 import type { EventRelayService } from "./event-relay.js";
 import { registerGstackRoles, unregisterGstackRoles } from "./gstack-roles.js";
@@ -32,6 +33,10 @@ export type GstackBootstrapOptions = {
   taskTracker?: TaskTrackerService;
   /** Reconcile interval in ms (default: 300_000 = 5 min) */
   reconcileIntervalMs?: number;
+  /** ConversationMemory for periodic idle session decay (optional) */
+  conversationMemory?: ConversationMemoryService;
+  /** Decay interval in ms (default: 1_800_000 = 30 min) */
+  decayIntervalMs?: number;
 };
 
 export type GstackBootstrapResult = {
@@ -43,6 +48,7 @@ export type GstackBootstrapResult = {
 
 let reapTimer: ReturnType<typeof setInterval> | null = null;
 let reconcileTimer: ReturnType<typeof setInterval> | null = null;
+let decayTimer: ReturnType<typeof setInterval> | null = null;
 let activeEngine: WorkflowEngine | null = null;
 let activeRegistry: AgentRegistry | null = null;
 
@@ -102,6 +108,27 @@ export function bootstrapGstack(opts: GstackBootstrapOptions): GstackBootstrapRe
     }
   }
 
+  // 5. Start periodic ConversationMemory idle session decay (if provided)
+  if (opts.conversationMemory) {
+    const decayMs = opts.decayIntervalMs ?? 1_800_000; // 30 min
+    const memory = opts.conversationMemory;
+    decayTimer = setInterval(() => {
+      void memory
+        .decayIdleSessions()
+        .then((decayed) => {
+          if (decayed > 0) {
+            console.log(`[gstack-bootstrap] Decayed TTL for ${decayed} idle session(s)`);
+          }
+        })
+        .catch((err: unknown) => {
+          console.error(`[gstack-bootstrap] Memory decay failed: ${String(err)}`);
+        });
+    }, decayMs);
+    if (decayTimer.unref) {
+      decayTimer.unref();
+    }
+  }
+
   activeEngine = engine;
 
   console.log(
@@ -124,6 +151,10 @@ export function shutdownGstack(): void {
   if (reconcileTimer) {
     clearInterval(reconcileTimer);
     reconcileTimer = null;
+  }
+  if (decayTimer) {
+    clearInterval(decayTimer);
+    decayTimer = null;
   }
   if (activeEngine) {
     activeEngine.dispose();

@@ -411,6 +411,12 @@ export class OpenClawApp extends LitElement {
   @state() overviewLogLines: string[] = [];
   @state() overviewLogCursor = 0;
 
+  // System metrics (from /metrics HTTP endpoint)
+  @state() metricsResult: import("./controllers/metrics.ts").MetricsResult | null = null;
+  @state() metricsLoading = false;
+  @state() metricsError: string | null = null;
+  private metricsTimer: ReturnType<typeof setInterval> | null = null;
+
   @state() skillsLoading = false;
   @state() skillsReport: SkillStatusReport | null = null;
   @state() skillsError: string | null = null;
@@ -617,6 +623,42 @@ export class OpenClawApp extends LitElement {
 
   async loadOverview() {
     await loadOverviewInternal(this as unknown as Parameters<typeof loadOverviewInternal>[0]);
+    // Also fetch system metrics (HTTP endpoint, independent of WS RPC)
+    void this.loadMetrics();
+  }
+
+  async loadMetrics() {
+    if (this.metricsLoading) {
+      return;
+    }
+    const token = this.settings.token?.trim();
+    if (!token) {
+      return;
+    }
+    const wsUrl = this.settings.gatewayUrl?.trim();
+    if (!wsUrl) {
+      return;
+    }
+    const httpBase = wsUrl.replace(/^ws(s?):\/\//, "http$1://").replace(/\/$/, "");
+    const { loadMetrics, createMetricsState } = await import("./controllers/metrics.ts");
+    const state = createMetricsState();
+    this.metricsLoading = true;
+    await loadMetrics(state, httpBase, token);
+    this.metricsResult = state.metricsResult;
+    this.metricsError = state.metricsError;
+    this.metricsLoading = false;
+  }
+
+  startMetricsAutoRefresh() {
+    this.stopMetricsAutoRefresh();
+    this.metricsTimer = setInterval(() => void this.loadMetrics(), 30_000);
+  }
+
+  stopMetricsAutoRefresh() {
+    if (this.metricsTimer) {
+      clearInterval(this.metricsTimer);
+      this.metricsTimer = null;
+    }
   }
 
   async loadCron() {

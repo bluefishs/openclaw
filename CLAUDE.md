@@ -132,13 +132,31 @@
 | delegate-http | `src/gateway/delegate-http.ts` | HTTP 委派 API（/delegate, /tasks/*, /events） |
 | correlation | `src/gateway/correlation.ts` | 分散式呼叫追蹤 correlation ID |
 
+### 可觀測性與記憶智慧化（2026-04 新增）
+| 模組 | 檔案 | 職責 |
+|------|------|------|
+| Microcompact | `src/agents/microcompact.ts` | 規則式 tool output 清理（截斷/過期/去重） |
+| /metrics API | `src/gateway/gstack-http-stages.ts` | 統一觀測端點（memory/tasks/microcompact/circuitBreaker） |
+| Metrics Alert | `src/gateway/metrics-alert-handler.ts` | Telegram 告警推送（rate-limited） |
+| CircuitBreaker Stats | `src/gateway/leader-agent.ts` | Agent 健康狀態導出 |
+| Relevance Scoring | `packages/memory-host-sdk/.../conversation-relevance.ts` | Ollama embeddings + cosine similarity + top-K |
+| Dashboard MVP | `ui/src/ui/views/overview-metrics.ts` | 系統指標儀表板面板 |
+
+### 記憶系統特性
+- **Secret 掃描**: saveTurn() 12 種 pattern 自動遮蔽（SK/GHP/Bearer/PEM/Telegram）
+- **Stale 標記**: formatForPrompt() >24h 記憶加 `stale="true"` 屬性
+- **召回頻率追蹤**: Redis HINCRBY 記錄每 session 被讀取次數
+- **自適應 TTL**: 高頻(≥5次)延長、低頻減半、零召回 3x 加速衰減
+- **Secret 輪替**: `scripts/rotate-secrets.sh --all`（GATEWAY_TOKEN + MCP_SERVICE_TOKEN）
+
 ### 關鍵技術決策
 - **Plugin-First**: 頻道、hooks、skills 全部插件化
 - **Multi-Agent**: 每 agent 獨立 session（`agent:agentId:sessionKey`）
 - **gstack Workflow**: 認知角色自動編排，closed-loop QA 重試
-- **Security-First Docker**: non-root、cap_drop ALL、no-new-privileges
+- **Security-First Docker**: non-root、cap_drop ALL、no-new-privileges、read_only（browser）
 - **Hot-Reload**: 設定 + skills 支援不重啟更新
 - **SSE Ticket Exchange**: 避免長效 token 暴露於 URL/logs
+- **Observability-First**: /metrics → Dashboard → Telegram alerts（數據驅動調優）
 
 ## Skills/Commands 工作流程
 

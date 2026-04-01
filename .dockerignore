@@ -6,6 +6,13 @@ secrets/
 *.pem
 *.key
 
+# Agent memory, credentials, and local config (may contain PII/secrets)
+memory/
+.claude/
+.agent/
+local/
+logs/
+
 .git
 .worktrees
 

@@ -48,6 +48,19 @@ fi
 
 git add -- "${files[@]}"
 
+# Secret detection: scan staged files against baseline to prevent credential leaks.
+# Requires: pip install detect-secrets (or pipx install detect-secrets)
+if command -v detect-secrets >/dev/null 2>&1 && [[ -f "$ROOT_DIR/.secrets.baseline" ]]; then
+  if ! git diff --cached --name-only --diff-filter=ACMR -z \
+       | xargs -0 detect-secrets-hook --baseline "$ROOT_DIR/.secrets.baseline" 2>/dev/null; then
+    echo ""
+    echo "ERROR: detect-secrets found potential credentials in staged files." >&2
+    echo "Run 'detect-secrets scan --baseline .secrets.baseline' to update baseline" >&2
+    echo "if this is a false positive, or remove the secret before committing." >&2
+    exit 1
+  fi
+fi
+
 # This hook is also exercised from lightweight temp repos in tests, where the
 # staged-file safety behavior matters but the full OpenClaw workspace does not
 # exist. Only run the repo-wide validation gate inside a real checkout.
